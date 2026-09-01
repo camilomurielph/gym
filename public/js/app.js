@@ -220,7 +220,7 @@ async function renderRoutines() {
   }
 }
 
-// Editor de rutinas (corregido)
+// Editor de rutinas (con correcciones: sincronización y búsqueda predictiva)
 async function renderEdit(data) {
   const mode = data.mode;
   const routineId = data.routineId;
@@ -247,6 +247,10 @@ async function renderEdit(data) {
   };
 
   function renderEditor() {
+    // Construir datalist con todos los nombres de ejercicios
+    const datalistId = 'ejercicios-datalist';
+    const datalistOptions = exercisesList.map(e => `<option value="${e.name}">`).join('');
+
     let html = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
         <h2>${mode === 'create' ? 'Crear rutina' : 'Editar rutina'}</h2>
@@ -287,7 +291,18 @@ async function renderEdit(data) {
               </div>
             `).join('')}
           </div>
-          <button class="add-btn" id="add-exercise-btn">(+) Agregar Ejercicio</button>
+
+          <!-- Nuevo selector con búsqueda predictiva -->
+          <div style="margin-top:1rem; display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+            <div style="flex:1; min-width:150px;">
+              <input type="text" id="exercise-search" list="${datalistId}" placeholder="Buscar ejercicio..." autocomplete="off" style="width:100%; padding:0.6rem; background:#2a2a3e; border:1px solid #444; border-radius:10px; color:#fff;">
+              <datalist id="${datalistId}">
+                ${datalistOptions}
+              </datalist>
+            </div>
+            <button id="add-exercise-btn" class="success" style="white-space:nowrap;">+ Agregar</button>
+          </div>
+
         </div>
         <button id="save-routine-btn" class="success" style="width:100%;margin-top:1rem;">Guardar rutina</button>
       </div>
@@ -314,7 +329,6 @@ async function renderEdit(data) {
     document.querySelectorAll('.add-set').forEach(btn => {
       btn.addEventListener('click', () => {
         const idx = parseInt(btn.dataset.exindex);
-        // Sincronizar estado actual
         syncStateFromInputs();
         state.exercises[idx].sets.push({ kg: '', reps: '' });
         renderEditor();
@@ -342,48 +356,43 @@ async function renderEdit(data) {
       });
     });
 
-    // Agregar ejercicio
+    // Agregar ejercicio (con búsqueda predictiva)
     document.getElementById('add-exercise-btn').addEventListener('click', () => {
-      const selectHtml = `
-        <div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:flex;justify-content:center;align-items:center;z-index:1000;">
-          <div style="background:#2a2a3e;color:white;padding:1.5rem;border-radius:12px;width:90%;max-width:400px;">
-            <h4>Seleccionar ejercicio</h4>
-            <select id="exercise-select" style="width:100%;padding:0.5rem;margin:1rem 0;background:#1a1a2e;color:white;border:1px solid #444;">
-              ${exercisesList.map(e => `<option value="${e.id}">${e.name}</option>`).join('')}
-            </select>
-            <div style="display:flex;gap:0.5rem;justify-content:flex-end;">
-              <button id="cancel-select" class="secondary">Cancelar</button>
-              <button id="confirm-select" class="success">Agregar</button>
-            </div>
-          </div>
-        </div>
-      `;
-      document.body.insertAdjacentHTML('beforeend', selectHtml);
-      document.getElementById('cancel-select').addEventListener('click', () => {
-        document.body.lastElementChild.remove();
+      const searchInput = document.getElementById('exercise-search');
+      const searchTerm = searchInput.value.trim();
+      if (!searchTerm) {
+        alert('Escribe el nombre del ejercicio que deseas agregar.');
+        return;
+      }
+
+      // Buscar coincidencia exacta o parcial (case insensitive)
+      const matched = exercisesList.find(e => e.name.toLowerCase() === searchTerm.toLowerCase());
+      if (!matched) {
+        alert(`No se encontró el ejercicio "${searchTerm}". Revisa la lista de ejercicios disponibles.`);
+        return;
+      }
+
+      // Sincronizar estado actual antes de modificar
+      syncStateFromInputs();
+
+      // Agregar el ejercicio encontrado
+      state.exercises.push({
+        exerciseId: matched.id,
+        exerciseName: matched.name,
+        sets: [{ kg: '', reps: '' }]
       });
-      document.getElementById('confirm-select').addEventListener('click', () => {
-        const exerciseId = parseInt(document.getElementById('exercise-select').value);
-        const exercise = exercisesList.find(e => e.id === exerciseId);
-        if (exercise) {
-          state.exercises.push({
-            exerciseId: exercise.id,
-            exerciseName: exercise.name,
-            sets: [{ kg: '', reps: '' }]
-          });
-          renderEditor();
-        }
-        document.body.lastElementChild.remove();
-      });
+
+      // Limpiar campo de búsqueda y re-renderizar
+      searchInput.value = '';
+      renderEditor();
     });
 
-    // Guardar
+    // Guardar rutina
     document.getElementById('save-routine-btn').addEventListener('click', async () => {
       syncStateFromInputs();
       const name = document.getElementById('routine-name').value.trim();
       if (!name) { alert('Ingresa un nombre'); return; }
       if (state.exercises.length === 0) { alert('Agrega al menos un ejercicio'); return; }
-      // Validar que cada ejercicio tenga al menos una serie
       for (let ex of state.exercises) {
         if (ex.sets.length === 0) {
           alert(`El ejercicio "${ex.exerciseName}" no tiene series.`);
@@ -426,7 +435,7 @@ async function startRoutine(routineId) {
   }
 }
 
-// Vista de entrenamiento (corregida)
+// Vista de entrenamiento
 function renderWorkout(data) {
   const sessionId = data.session_id;
   const exercises = data.exercises;
@@ -491,7 +500,6 @@ function renderWorkout(data) {
     // Terminar
     document.getElementById('finish-workout-btn').addEventListener('click', async () => {
       if (!confirm('¿Finalizar entrenamiento?')) return;
-      // Recolectar datos actuales
       const updates = [];
       document.querySelectorAll('tbody tr').forEach(row => {
         const setid = parseInt(row.dataset.setid);
