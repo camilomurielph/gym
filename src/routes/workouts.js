@@ -5,6 +5,7 @@ const RoutineExercise = require('../models/RoutineExercise');
 const RoutineSet = require('../models/RoutineSet');
 const WorkoutSession = require('../models/WorkoutSession');
 const WorkoutExerciseSet = require('../models/WorkoutExerciseSet');
+const { db } = require('../db/db');
 
 const router = express.Router();
 
@@ -16,10 +17,7 @@ router.post('/routines/:id/start', authenticate, (req, res) => {
     return res.status(404).json({ error: 'Rutina no encontrada' });
   }
 
-  // Crear sesión
   const sessionId = WorkoutSession.create(req.userId, routineId);
-
-  // Obtener ejercicios de la rutina
   const routineExercises = RoutineExercise.findByRoutine(routineId);
   const sessionData = [];
 
@@ -28,16 +26,18 @@ router.post('/routines/:id/start', authenticate, (req, res) => {
     const exerciseName = re.exercise_name;
     const exerciseId = re.exercise_id;
 
-    // Para cada set, obtener último valor de sesión anterior (para "Anterior")
     const setData = sets.map(set => {
-      // Buscar último valor de este mismo routine_exercise en sesiones anteriores
-      const last = WorkoutExerciseSet.getLastValuesForRoutineExercise(re.id, req.userId);
+      // Obtener último valor para este routine_exercise Y este set_number
+      const last = WorkoutExerciseSet.getLastValuesForRoutineExerciseAndSet(
+        re.id,
+        set.set_number,
+        req.userId
+      );
       const defaultKg = set.kg;
       const defaultReps = set.reps;
       const lastKg = last ? last.kg : null;
       const lastReps = last ? last.reps : null;
 
-      // Crear registro en workout_exercise_sets
       const currentKg = lastKg !== null ? lastKg : defaultKg;
       const currentReps = lastReps !== null ? lastReps : defaultReps;
       const wesId = WorkoutExerciseSet.create(
@@ -76,10 +76,10 @@ router.post('/routines/:id/start', authenticate, (req, res) => {
   });
 });
 
-// Actualizar un set durante la sesión (opcional, se puede usar para guardar cambios en tiempo real)
+// Actualizar un set (opcional)
 router.put('/sets/:id', authenticate, (req, res) => {
   const { kg, reps, completed } = req.body;
-  const set = WorkoutExerciseSet.updateSet(req.params.id, kg, reps, completed);
+  WorkoutExerciseSet.updateSet(req.params.id, kg, reps, completed);
   res.json({ success: true });
 });
 
@@ -90,12 +90,36 @@ router.post('/sessions/:id/finish', authenticate, (req, res) => {
   if (!session || session.user_id !== req.userId) {
     return res.status(404).json({ error: 'Sesión no encontrada' });
   }
-  // Calcular duración en segundos (diferencia entre start_time y now)
   const start = new Date(session.start_time);
   const now = new Date();
   const duration = Math.floor((now - start) / 1000);
   WorkoutSession.finish(sessionId, duration);
   res.json({ success: true, duration });
+});
+
+// Obtener historial de sesiones
+router.get('/sessions', authenticate, (req, res) => {
+  const sessions = db.prepare(`
+    SELECT ws.*, r.name as routine_name
+    FROM workout_sessions ws
+    JOIN routines r ON ws.routine_id = r.id
+    WHERE ws.user_id = ?
+    ORDER BY ws.start_time DESC
+  `).all(req.userId);
+
+  const sessionsWithDetails = sessions.map(session => {
+    const sets = db.prepare(`
+      SELECT wes.*, e.name as exercise_name
+      FROM workout_exercise_sets wes
+      JOIN routine_exercises re ON wes.routine_exercise_id = re.id
+      JOIN exercises e ON re.exercise_id = e.id
+      WHERE wes.session_id = ?
+      ORDER BY re.order_index, wes.set_number
+    `).all(session.id);
+    return { ...session, sets };
+  });
+
+  res.json(sessionsWithDetails);
 });
 
 module.exports = router;
