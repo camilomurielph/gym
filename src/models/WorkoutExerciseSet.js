@@ -29,21 +29,20 @@ function updateSet(id, kg, reps, completed) {
   stmt.run(kg, reps, completed, id);
 }
 
-function getLastValuesForRoutineExercise(routineExerciseId, userId) {
-  // Buscar la última sesión del usuario que contenga este routine_exercise
+// NUEVO: Obtener último valor para un routine_exercise_id y set_number específico
+function getLastValuesForRoutineExerciseAndSet(routineExerciseId, setNumber, userId) {
   const stmt = db.prepare(`
     SELECT wes.kg, wes.reps
     FROM workout_exercise_sets wes
     JOIN workout_sessions ws ON wes.session_id = ws.id
-    WHERE wes.routine_exercise_id = ? AND ws.user_id = ?
+    WHERE wes.routine_exercise_id = ? AND wes.set_number = ? AND ws.user_id = ?
     ORDER BY ws.start_time DESC
     LIMIT 1
   `);
-  return stmt.get(routineExerciseId, userId);
+  return stmt.get(routineExerciseId, setNumber, userId);
 }
 
 function getLastValuesForExercise(exerciseId, userId) {
-  // Obtener el último valor usado para un ejercicio (en cualquier rutina)
   const stmt = db.prepare(`
     SELECT wes.kg, wes.reps
     FROM workout_exercise_sets wes
@@ -60,6 +59,6 @@ module.exports = {
   create,
   findBySession,
   updateSet,
-  getLastValuesForRoutineExercise,
+  getLastValuesForRoutineExerciseAndSet,
   getLastValuesForExercise,
 };
