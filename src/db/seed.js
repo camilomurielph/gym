@@ -29,10 +29,20 @@ const ejercicios = [
 ];
 
 function seedExercises() {
+  // Verificar si ya hay ejercicios
   const stmt = db.prepare('SELECT COUNT(*) as count FROM exercises');
   const { count } = stmt.get();
-  if (count > 0) return;
+  console.log(`📊 Ejercicios existentes: ${count}`);
 
+  if (count > 0) {
+    console.log('✅ Los ejercicios ya están sembrados. No se hace nada.');
+    // Mostrar algunos IDs para depuración
+    const sample = db.prepare('SELECT id, name FROM exercises LIMIT 5').all();
+    console.log('📋 Muestra de ejercicios:', sample);
+    return;
+  }
+
+  console.log('🌱 Sembrando ejercicios por primera vez...');
   const insert = db.prepare(`
     INSERT INTO exercises (name, description, category, muscle_group)
     VALUES (?, ?, ?, ?)
@@ -42,8 +52,16 @@ function seedExercises() {
       insert.run(ex.name, '', ex.category, ex.muscle_group);
     }
   });
-  insertMany(ejercicios);
-  console.log('Ejercicios sembrados correctamente.');
+
+  try {
+    insertMany(ejercicios);
+    console.log(`✅ ${ejercicios.length} ejercicios sembrados correctamente.`);
+    // Verificar
+    const all = db.prepare('SELECT id, name FROM exercises').all();
+    console.log('📋 Ejercicios en DB:', all);
+  } catch (err) {
+    console.error('❌ Error al sembrar ejercicios:', err);
+  }
 }
 
 module.exports = { seedExercises };
