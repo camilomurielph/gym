@@ -1,9 +1,8 @@
 // Estado global
 let token = localStorage.getItem('token');
 let user = null;
-let currentView = 'login'; // login, register, routines, edit, workout
+let currentView = 'login';
 
-// Elementos DOM
 const main = document.getElementById('main-content');
 const usernameSpan = document.getElementById('username');
 const userInfoDiv = document.getElementById('user-info');
@@ -32,6 +31,7 @@ function navigate(view, data = null) {
     case 'routines': renderRoutines(); break;
     case 'edit': renderEdit(data); break;
     case 'workout': renderWorkout(data); break;
+    case 'history': renderHistory(); break;
     default: renderLogin();
   }
 }
@@ -41,6 +41,7 @@ function setAuth(tokenValue, userData) {
   token = tokenValue;
   user = userData;
   localStorage.setItem('token', token);
+  localStorage.setItem('user', JSON.stringify(user));
   usernameSpan.textContent = user.username;
   userInfoDiv.style.display = 'flex';
   navigate('routines');
@@ -50,36 +51,33 @@ function logout() {
   token = null;
   user = null;
   localStorage.removeItem('token');
+  localStorage.removeItem('user');
   userInfoDiv.style.display = 'none';
   navigate('login');
 }
 
 logoutBtn.addEventListener('click', logout);
 
-// Verificar token al cargar
+// Verificar token
 if (token) {
-  // Podríamos validar el token con una llamada a /me, pero por simplicidad lo damos por bueno
-  // y forzamos login si falla. Mejor ir a routines y si da error 401, logout.
-  apiFetch('/api/routines')
-    .then(() => {
-      // Asumimos que el token es válido, pero necesitamos el username. Lo guardamos en localStorage o lo pedimos.
-      // Podríamos tener un endpoint /me. Para simplificar, almacenamos el username al hacer login.
-      const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
-      if (storedUser) {
-        user = storedUser;
-        usernameSpan.textContent = user.username;
-        userInfoDiv.style.display = 'flex';
-        navigate('routines');
-      } else {
-        logout();
-      }
-    })
-    .catch(() => logout());
+  const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
+  if (storedUser) {
+    user = storedUser;
+    usernameSpan.textContent = user.username;
+    userInfoDiv.style.display = 'flex';
+    // Intentar cargar rutinas para validar token
+    apiFetch('/api/routines')
+      .then(() => navigate('routines'))
+      .catch(() => logout());
+  } else {
+    logout();
+  }
 } else {
   navigate('login');
 }
 
-// Vistas
+// --- Vistas ---
+
 function renderLogin() {
   main.innerHTML = `
     <div class="card">
@@ -109,7 +107,6 @@ function renderLogin() {
         method: 'POST',
         body: JSON.stringify({ username, password })
       });
-      localStorage.setItem('user', JSON.stringify(data.user));
       setAuth(data.token, data.user);
     } catch (err) {
       alert(err.message);
@@ -150,7 +147,6 @@ function renderRegister() {
         method: 'POST',
         body: JSON.stringify({ username, password })
       });
-      localStorage.setItem('user', JSON.stringify(data.user));
       setAuth(data.token, data.user);
     } catch (err) {
       alert(err.message);
@@ -169,7 +165,10 @@ async function renderRoutines() {
     let html = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
         <h2>Mis rutinas</h2>
-        <button id="create-routine-btn" class="success">+ Crear</button>
+        <div>
+          <button id="history-btn" class="secondary" style="margin-right:0.5rem;">📋 Historial</button>
+          <button id="create-routine-btn" class="success">+ Crear</button>
+        </div>
       </div>
     `;
     if (routines.length === 0) {
@@ -196,6 +195,7 @@ async function renderRoutines() {
     main.innerHTML = html;
 
     document.getElementById('create-routine-btn').addEventListener('click', () => navigate('edit', { mode: 'create' }));
+    document.getElementById('history-btn').addEventListener('click', () => navigate('history'));
 
     document.querySelectorAll('[data-action="start"]').forEach(btn => {
       btn.addEventListener('click', () => startRoutine(btn.dataset.id));
@@ -220,7 +220,7 @@ async function renderRoutines() {
   }
 }
 
-// Editar/Crear rutina
+// Editor de rutinas (corregido)
 async function renderEdit(data) {
   const mode = data.mode;
   const routineId = data.routineId;
@@ -237,13 +237,12 @@ async function renderEdit(data) {
     return;
   }
 
-  // Estado local del editor
   const state = {
     name: routine ? routine.name : '',
     exercises: routine ? routine.exercises.map(ex => ({
       exerciseId: ex.exercise_id,
       exerciseName: ex.exercise_name,
-      sets: ex.sets.map(s => ({ kg: s.kg, reps: s.reps }))
+      sets: ex.sets.map(s => ({ kg: s.kg !== null ? s.kg : '', reps: s.reps || '' }))
     })) : []
   };
 
@@ -270,7 +269,7 @@ async function renderEdit(data) {
                 <div class="table-responsive">
                   <table>
                     <thead>
-                      <tr><th>Serie</th><th>KG</th><th>Reps</th></tr>
+                      <tr><th>Serie</th><th>KG</th><th>Reps</th><th></th></tr>
                     </thead>
                     <tbody>
                       ${ex.sets.map((set, sidx) => `
@@ -278,6 +277,7 @@ async function renderEdit(data) {
                           <td>${sidx+1}</td>
                           <td><input type="text" class="set-kg" data-exindex="${idx}" data-setindex="${sidx}" value="${set.kg || ''}" placeholder="kg"></td>
                           <td><input type="text" class="set-reps" data-exindex="${idx}" data-setindex="${sidx}" value="${set.reps || ''}" placeholder="ej. 12 o 6-8"></td>
+                          <td><button class="danger remove-set" data-exindex="${idx}" data-setindex="${sidx}">✕</button></td>
                         </tr>
                       `).join('')}
                     </tbody>
@@ -298,11 +298,36 @@ async function renderEdit(data) {
     document.getElementById('back-to-routines').addEventListener('click', () => navigate('routines'));
     document.getElementById('routine-name').addEventListener('input', (e) => state.name = e.target.value);
 
+    // Función para leer valores actuales de los inputs y actualizar state
+    function syncStateFromInputs() {
+      document.querySelectorAll('.exercise-block').forEach((block, idx) => {
+        const kgInputs = block.querySelectorAll('.set-kg');
+        const repsInputs = block.querySelectorAll('.set-reps');
+        state.exercises[idx].sets = Array.from(kgInputs).map((inp, i) => ({
+          kg: inp.value,
+          reps: repsInputs[i].value
+        }));
+      });
+    }
+
     // Agregar serie
     document.querySelectorAll('.add-set').forEach(btn => {
       btn.addEventListener('click', () => {
         const idx = parseInt(btn.dataset.exindex);
+        // Sincronizar estado actual
+        syncStateFromInputs();
         state.exercises[idx].sets.push({ kg: '', reps: '' });
+        renderEditor();
+      });
+    });
+
+    // Eliminar serie
+    document.querySelectorAll('.remove-set').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const exIdx = parseInt(btn.dataset.exindex);
+        const setIdx = parseInt(btn.dataset.setindex);
+        syncStateFromInputs();
+        state.exercises[exIdx].sets.splice(setIdx, 1);
         renderEditor();
       });
     });
@@ -311,19 +336,19 @@ async function renderEdit(data) {
     document.querySelectorAll('.remove-exercise').forEach(btn => {
       btn.addEventListener('click', () => {
         const idx = parseInt(btn.dataset.index);
+        syncStateFromInputs();
         state.exercises.splice(idx, 1);
         renderEditor();
       });
     });
 
-    // Agregar ejercicio (muestra modal o select)
+    // Agregar ejercicio
     document.getElementById('add-exercise-btn').addEventListener('click', () => {
-      // Mostrar un selector de ejercicios
       const selectHtml = `
-        <div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;justify-content:center;align-items:center;z-index:1000;">
-          <div style="background:white;padding:1.5rem;border-radius:12px;width:90%;max-width:400px;">
+        <div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:flex;justify-content:center;align-items:center;z-index:1000;">
+          <div style="background:#2a2a3e;color:white;padding:1.5rem;border-radius:12px;width:90%;max-width:400px;">
             <h4>Seleccionar ejercicio</h4>
-            <select id="exercise-select" style="width:100%;padding:0.5rem;margin:1rem 0;">
+            <select id="exercise-select" style="width:100%;padding:0.5rem;margin:1rem 0;background:#1a1a2e;color:white;border:1px solid #444;">
               ${exercisesList.map(e => `<option value="${e.id}">${e.name}</option>`).join('')}
             </select>
             <div style="display:flex;gap:0.5rem;justify-content:flex-end;">
@@ -354,22 +379,21 @@ async function renderEdit(data) {
 
     // Guardar
     document.getElementById('save-routine-btn').addEventListener('click', async () => {
-      // Recolectar datos de los inputs
+      syncStateFromInputs();
       const name = document.getElementById('routine-name').value.trim();
       if (!name) { alert('Ingresa un nombre'); return; }
-      const exercisesData = [];
-      document.querySelectorAll('.exercise-block').forEach((block, idx) => {
-        const exId = state.exercises[idx].exerciseId;
-        const sets = [];
-        block.querySelectorAll('tbody tr').forEach((row, sidx) => {
-          const kg = row.querySelector('.set-kg').value;
-          const reps = row.querySelector('.set-reps').value;
-          sets.push({ kg: kg || null, reps: reps || '' });
-        });
-        exercisesData.push({ exerciseId: exId, sets });
-      });
-      if (exercisesData.length === 0) { alert('Agrega al menos un ejercicio'); return; }
-
+      if (state.exercises.length === 0) { alert('Agrega al menos un ejercicio'); return; }
+      // Validar que cada ejercicio tenga al menos una serie
+      for (let ex of state.exercises) {
+        if (ex.sets.length === 0) {
+          alert(`El ejercicio "${ex.exerciseName}" no tiene series.`);
+          return;
+        }
+      }
+      const exercisesData = state.exercises.map(ex => ({
+        exerciseId: ex.exerciseId,
+        sets: ex.sets.map(s => ({ kg: s.kg || null, reps: s.reps || '' }))
+      }));
       try {
         if (mode === 'create') {
           await apiFetch('/api/routines', {
@@ -402,7 +426,7 @@ async function startRoutine(routineId) {
   }
 }
 
-// Vista de entrenamiento
+// Vista de entrenamiento (corregida)
 function renderWorkout(data) {
   const sessionId = data.session_id;
   const exercises = data.exercises;
@@ -455,7 +479,7 @@ function renderWorkout(data) {
 
     main.innerHTML = html;
 
-    // Iniciar timer
+    // Timer
     if (timerInterval) clearInterval(timerInterval);
     timerInterval = setInterval(() => {
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -464,10 +488,10 @@ function renderWorkout(data) {
       document.getElementById('timer').textContent = `${mins}:${secs}`;
     }, 1000);
 
-    // Evento terminar
+    // Terminar
     document.getElementById('finish-workout-btn').addEventListener('click', async () => {
       if (!confirm('¿Finalizar entrenamiento?')) return;
-      // Recolectar datos actuales de los inputs
+      // Recolectar datos actuales
       const updates = [];
       document.querySelectorAll('tbody tr').forEach(row => {
         const setid = parseInt(row.dataset.setid);
@@ -476,9 +500,6 @@ function renderWorkout(data) {
         const completed = row.querySelector('.workout-completed').checked ? 1 : 0;
         updates.push({ id: setid, kg, reps, completed });
       });
-      // Enviar actualizaciones (opcional, podemos enviar todas al final)
-      // Para simplificar, enviamos cada set actualizado (o podríamos tener un endpoint batch)
-      // Usaremos el endpoint de actualización individual
       try {
         for (const upd of updates) {
           await apiFetch(`/api/workouts/sets/${upd.id}`, {
@@ -486,7 +507,6 @@ function renderWorkout(data) {
             body: JSON.stringify({ kg: upd.kg, reps: upd.reps, completed: upd.completed })
           });
         }
-        // Finalizar sesión
         await apiFetch(`/api/workouts/sessions/${sessionId}/finish`, { method: 'POST' });
         clearInterval(timerInterval);
         alert('¡Entrenamiento finalizado!');
@@ -498,4 +518,50 @@ function renderWorkout(data) {
   }
 
   renderWorkoutView();
+}
+
+// Historial
+async function renderHistory() {
+  try {
+    const sessions = await apiFetch('/api/workouts/sessions');
+    let html = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+        <h2>📋 Historial</h2>
+        <button id="back-to-routines" class="secondary">← Volver</button>
+      </div>
+    `;
+    if (sessions.length === 0) {
+      html += `<p>Aún no has completado ningún entrenamiento.</p>`;
+    } else {
+      sessions.forEach(session => {
+        const start = new Date(session.start_time);
+        const end = session.end_time ? new Date(session.end_time) : null;
+        const duration = session.duration_seconds ? `${Math.floor(session.duration_seconds/60)}min ${session.duration_seconds%60}s` : 'N/A';
+        html += `
+          <div class="card session-card">
+            <div style="display:flex;justify-content:space-between;">
+              <strong>${session.routine_name}</strong>
+              <span>${start.toLocaleDateString()} ${start.toLocaleTimeString()}</span>
+            </div>
+            <div>Duración: ${duration}</div>
+            <details>
+              <summary style="cursor:pointer;margin-top:0.5rem;">Ver detalles</summary>
+              <div style="margin-top:0.5rem;">
+                ${session.sets.map(set => `
+                  <div style="display:flex;justify-content:space-between;padding:0.2rem 0;border-bottom:1px solid #444;">
+                    <span>${set.exercise_name} (Serie ${set.set_number})</span>
+                    <span>${set.kg}kg x ${set.reps} ${set.completed ? '✅' : '❌'}</span>
+                  </div>
+                `).join('')}
+              </div>
+            </details>
+          </div>
+        `;
+      });
+    }
+    main.innerHTML = html;
+    document.getElementById('back-to-routines').addEventListener('click', () => navigate('routines'));
+  } catch (err) {
+    alert(err.message);
+  }
 }
