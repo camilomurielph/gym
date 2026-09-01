@@ -44,6 +44,10 @@ router.get('/:id', authenticate, (req, res) => {
 router.post('/', authenticate, (req, res) => {
   const { name, exercises } = req.body;
 
+  // Log para depuración
+  console.log('📥 Recibida petición POST /api/routines');
+  console.log('Datos recibidos:', JSON.stringify({ name, exercises }, null, 2));
+
   // Validaciones básicas
   if (!name || typeof name !== 'string' || name.trim() === '') {
     return res.status(400).json({ error: 'El nombre de la rutina es obligatorio' });
@@ -58,14 +62,28 @@ router.post('/', authenticate, (req, res) => {
       return res.status(400).json({ error: 'Cada ejercicio debe tener un ID y al menos una serie' });
     }
     for (const set of ex.sets) {
-      // kg puede ser número o null, reps puede ser string o número
       if (set.kg !== undefined && set.kg !== null && isNaN(parseFloat(set.kg))) {
         return res.status(400).json({ error: 'El KG debe ser un número válido' });
       }
-      if (set.reps !== undefined && set.reps !== null && typeof set.reps !== 'string' && typeof set.reps !== 'number') {
-        return res.status(400).json({ error: 'Las repeticiones deben ser texto o número' });
-      }
     }
+  }
+
+  // Verificar que todos los exerciseId existen en la tabla exercises
+  const exerciseIds = exercises.map(e => e.exerciseId);
+  const placeholders = exerciseIds.map(() => '?').join(',');
+  const existing = db.prepare(`SELECT id FROM exercises WHERE id IN (${placeholders})`).all(exerciseIds);
+  const existingIds = existing.map(row => row.id);
+  const missing = exerciseIds.filter(id => !existingIds.includes(id));
+
+  if (missing.length > 0) {
+    // Obtener todos los IDs disponibles para ayudar a depurar
+    const allExercises = db.prepare('SELECT id, name FROM exercises').all();
+    console.error('❌ IDs faltantes:', missing);
+    console.log('📋 Ejercicios disponibles:', allExercises);
+    return res.status(400).json({
+      error: `Los siguientes exerciseId no existen: ${missing.join(', ')}`,
+      disponibles: allExercises
+    });
   }
 
   // Usar transacción para evitar datos inconsistentes
@@ -86,7 +104,7 @@ router.post('/', authenticate, (req, res) => {
     const routineId = insertRoutine();
     res.status(201).json({ id: routineId, message: 'Rutina creada correctamente' });
   } catch (err) {
-    console.error('Error al crear rutina:', err);
+    console.error('❌ Error al crear rutina:', err);
     res.status(500).json({ error: 'Error al guardar la rutina: ' + err.message });
   }
 });
@@ -95,6 +113,9 @@ router.post('/', authenticate, (req, res) => {
 router.put('/:id', authenticate, (req, res) => {
   const routineId = parseInt(req.params.id);
   const { name, exercises } = req.body;
+
+  console.log('📥 Recibida petición PUT /api/routines/' + routineId);
+  console.log('Datos recibidos:', JSON.stringify({ name, exercises }, null, 2));
 
   // Validaciones
   if (!name || typeof name !== 'string' || name.trim() === '') {
@@ -119,6 +140,23 @@ router.put('/:id', authenticate, (req, res) => {
   const routine = Routine.findById(routineId);
   if (!routine || routine.user_id !== req.userId) {
     return res.status(404).json({ error: 'Rutina no encontrada o no autorizada' });
+  }
+
+  // Verificar exerciseIds
+  const exerciseIds = exercises.map(e => e.exerciseId);
+  const placeholders = exerciseIds.map(() => '?').join(',');
+  const existing = db.prepare(`SELECT id FROM exercises WHERE id IN (${placeholders})`).all(exerciseIds);
+  const existingIds = existing.map(row => row.id);
+  const missing = exerciseIds.filter(id => !existingIds.includes(id));
+
+  if (missing.length > 0) {
+    const allExercises = db.prepare('SELECT id, name FROM exercises').all();
+    console.error('❌ IDs faltantes en PUT:', missing);
+    console.log('📋 Ejercicios disponibles:', allExercises);
+    return res.status(400).json({
+      error: `Los siguientes exerciseId no existen: ${missing.join(', ')}`,
+      disponibles: allExercises
+    });
   }
 
   // Usar transacción
@@ -148,7 +186,7 @@ router.put('/:id', authenticate, (req, res) => {
     updateRoutine();
     res.json({ success: true, message: 'Rutina actualizada correctamente' });
   } catch (err) {
-    console.error('Error al actualizar rutina:', err);
+    console.error('❌ Error al actualizar rutina:', err);
     res.status(500).json({ error: 'Error al guardar la rutina: ' + err.message });
   }
 });
