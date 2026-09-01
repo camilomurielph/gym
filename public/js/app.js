@@ -1,4 +1,6 @@
-// Estado global
+// ============================================================
+//  ESTADO GLOBAL
+// ============================================================
 let token = localStorage.getItem('token');
 let user = null;
 let currentView = 'login';
@@ -8,21 +10,41 @@ const usernameSpan = document.getElementById('username');
 const userInfoDiv = document.getElementById('user-info');
 const logoutBtn = document.getElementById('logout-btn');
 
-// Utilidades
-function apiFetch(url, options = {}) {
+// ============================================================
+//  FETCH CON MANEJO DE ERRORES MEJORADO
+// ============================================================
+async function apiFetch(url, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
     ...(token ? { 'Authorization': `Bearer ${token}` } : {})
   };
-  return fetch(url, { ...options, headers })
-    .then(res => res.json())
-    .then(data => {
-      if (data.error) throw new Error(data.error);
-      return data;
-    });
+  const response = await fetch(url, { ...options, headers });
+
+  // Intentar parsear como JSON
+  let data;
+  const contentType = response.headers.get('content-type');
+  if (contentType && contentType.includes('application/json')) {
+    data = await response.json();
+  } else {
+    // Si no es JSON, leer como texto (posible HTML)
+    const text = await response.text();
+    // Si la respuesta no es exitosa, lanzamos error con el texto
+    if (!response.ok) {
+      throw new Error(`Error ${response.status}: ${text.substring(0, 100)}...`);
+    }
+    // Si es exitosa pero no es JSON (raro), lanzamos error
+    throw new Error(`Respuesta inesperada (no JSON): ${text.substring(0, 100)}...`);
+  }
+
+  if (data.error) {
+    throw new Error(data.error);
+  }
+  return data;
 }
 
-// Navegación
+// ============================================================
+//  NAVEGACIÓN Y AUTENTICACIÓN
+// ============================================================
 function navigate(view, data = null) {
   currentView = view;
   switch(view) {
@@ -36,7 +58,6 @@ function navigate(view, data = null) {
   }
 }
 
-// Autenticación
 function setAuth(tokenValue, userData) {
   token = tokenValue;
   user = userData;
@@ -58,14 +79,13 @@ function logout() {
 
 logoutBtn.addEventListener('click', logout);
 
-// Verificar token
+// Verificar token al cargar
 if (token) {
   const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
   if (storedUser) {
     user = storedUser;
     usernameSpan.textContent = user.username;
     userInfoDiv.style.display = 'flex';
-    // Intentar cargar rutinas para validar token
     apiFetch('/api/routines')
       .then(() => navigate('routines'))
       .catch(() => logout());
@@ -76,8 +96,11 @@ if (token) {
   navigate('login');
 }
 
-// --- Vistas ---
+// ============================================================
+//  VISTAS
+// ============================================================
 
+// ---------- LOGIN ----------
 function renderLogin() {
   main.innerHTML = `
     <div class="card">
@@ -109,7 +132,7 @@ function renderLogin() {
       });
       setAuth(data.token, data.user);
     } catch (err) {
-      alert(err.message);
+      alert('Error al iniciar sesión: ' + err.message);
     }
   });
   document.getElementById('go-to-register').addEventListener('click', (e) => {
@@ -118,6 +141,7 @@ function renderLogin() {
   });
 }
 
+// ---------- REGISTRO ----------
 function renderRegister() {
   main.innerHTML = `
     <div class="card">
@@ -149,7 +173,7 @@ function renderRegister() {
       });
       setAuth(data.token, data.user);
     } catch (err) {
-      alert(err.message);
+      alert('Error al registrarse: ' + err.message);
     }
   });
   document.getElementById('go-to-login').addEventListener('click', (e) => {
@@ -158,7 +182,7 @@ function renderRegister() {
   });
 }
 
-// Rutinas
+// ---------- RUTINAS ----------
 async function renderRoutines() {
   try {
     const routines = await apiFetch('/api/routines');
@@ -212,15 +236,15 @@ async function renderRoutines() {
       });
     });
   } catch (err) {
-    if (err.message === 'No autorizado' || err.status === 401) {
+    if (err.message.includes('No autorizado') || err.message.includes('401')) {
       logout();
     } else {
-      alert(err.message);
+      alert('Error al cargar rutinas: ' + err.message);
     }
   }
 }
 
-// Editor de rutinas (con correcciones: sincronización y búsqueda predictiva)
+// ---------- EDITOR DE RUTINAS (con búsqueda predictiva y sin pérdida de datos) ----------
 async function renderEdit(data) {
   const mode = data.mode;
   const routineId = data.routineId;
@@ -233,7 +257,7 @@ async function renderEdit(data) {
       routine = await apiFetch(`/api/routines/${routineId}`);
     }
   } catch (err) {
-    alert(err.message);
+    alert('Error al cargar datos: ' + err.message);
     return;
   }
 
@@ -247,7 +271,6 @@ async function renderEdit(data) {
   };
 
   function renderEditor() {
-    // Construir datalist con todos los nombres de ejercicios
     const datalistId = 'ejercicios-datalist';
     const datalistOptions = exercisesList.map(e => `<option value="${e.name}">`).join('');
 
@@ -292,7 +315,6 @@ async function renderEdit(data) {
             `).join('')}
           </div>
 
-          <!-- Nuevo selector con búsqueda predictiva -->
           <div style="margin-top:1rem; display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
             <div style="flex:1; min-width:150px;">
               <input type="text" id="exercise-search" list="${datalistId}" placeholder="Buscar ejercicio..." autocomplete="off" style="width:100%; padding:0.6rem; background:#2a2a3e; border:1px solid #444; border-radius:10px; color:#fff;">
@@ -313,7 +335,6 @@ async function renderEdit(data) {
     document.getElementById('back-to-routines').addEventListener('click', () => navigate('routines'));
     document.getElementById('routine-name').addEventListener('input', (e) => state.name = e.target.value);
 
-    // Función para leer valores actuales de los inputs y actualizar state
     function syncStateFromInputs() {
       document.querySelectorAll('.exercise-block').forEach((block, idx) => {
         const kgInputs = block.querySelectorAll('.set-kg');
@@ -356,7 +377,7 @@ async function renderEdit(data) {
       });
     });
 
-    // Agregar ejercicio (con búsqueda predictiva)
+    // Agregar ejercicio
     document.getElementById('add-exercise-btn').addEventListener('click', () => {
       const searchInput = document.getElementById('exercise-search');
       const searchTerm = searchInput.value.trim();
@@ -364,25 +385,17 @@ async function renderEdit(data) {
         alert('Escribe el nombre del ejercicio que deseas agregar.');
         return;
       }
-
-      // Buscar coincidencia exacta o parcial (case insensitive)
       const matched = exercisesList.find(e => e.name.toLowerCase() === searchTerm.toLowerCase());
       if (!matched) {
         alert(`No se encontró el ejercicio "${searchTerm}". Revisa la lista de ejercicios disponibles.`);
         return;
       }
-
-      // Sincronizar estado actual antes de modificar
       syncStateFromInputs();
-
-      // Agregar el ejercicio encontrado
       state.exercises.push({
         exerciseId: matched.id,
         exerciseName: matched.name,
         sets: [{ kg: '', reps: '' }]
       });
-
-      // Limpiar campo de búsqueda y re-renderizar
       searchInput.value = '';
       renderEditor();
     });
@@ -417,7 +430,7 @@ async function renderEdit(data) {
         }
         navigate('routines');
       } catch (err) {
-        alert(err.message);
+        alert('Error al guardar la rutina: ' + err.message);
       }
     });
   }
@@ -425,17 +438,17 @@ async function renderEdit(data) {
   renderEditor();
 }
 
-// Comenzar rutina
+// ---------- COMENZAR RUTINA ----------
 async function startRoutine(routineId) {
   try {
     const data = await apiFetch(`/api/workouts/routines/${routineId}/start`, { method: 'POST' });
     navigate('workout', data);
   } catch (err) {
-    alert(err.message);
+    alert('Error al comenzar la rutina: ' + err.message);
   }
 }
 
-// Vista de entrenamiento
+// ---------- VISTA DE ENTRENAMIENTO ----------
 function renderWorkout(data) {
   const sessionId = data.session_id;
   const exercises = data.exercises;
@@ -488,7 +501,6 @@ function renderWorkout(data) {
 
     main.innerHTML = html;
 
-    // Timer
     if (timerInterval) clearInterval(timerInterval);
     timerInterval = setInterval(() => {
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -497,7 +509,6 @@ function renderWorkout(data) {
       document.getElementById('timer').textContent = `${mins}:${secs}`;
     }, 1000);
 
-    // Terminar
     document.getElementById('finish-workout-btn').addEventListener('click', async () => {
       if (!confirm('¿Finalizar entrenamiento?')) return;
       const updates = [];
@@ -520,7 +531,7 @@ function renderWorkout(data) {
         alert('¡Entrenamiento finalizado!');
         navigate('routines');
       } catch (err) {
-        alert(err.message);
+        alert('Error al finalizar: ' + err.message);
       }
     });
   }
@@ -528,7 +539,7 @@ function renderWorkout(data) {
   renderWorkoutView();
 }
 
-// Historial
+// ---------- HISTORIAL ----------
 async function renderHistory() {
   try {
     const sessions = await apiFetch('/api/workouts/sessions');
@@ -543,7 +554,6 @@ async function renderHistory() {
     } else {
       sessions.forEach(session => {
         const start = new Date(session.start_time);
-        const end = session.end_time ? new Date(session.end_time) : null;
         const duration = session.duration_seconds ? `${Math.floor(session.duration_seconds/60)}min ${session.duration_seconds%60}s` : 'N/A';
         html += `
           <div class="card session-card">
@@ -570,6 +580,6 @@ async function renderHistory() {
     main.innerHTML = html;
     document.getElementById('back-to-routines').addEventListener('click', () => navigate('routines'));
   } catch (err) {
-    alert(err.message);
+    alert('Error al cargar historial: ' + err.message);
   }
 }
