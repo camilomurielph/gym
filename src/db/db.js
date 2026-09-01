@@ -4,7 +4,7 @@ const path = require('path');
 const dbPath = path.join(__dirname, '../../database.sqlite');
 const db = new Database(dbPath);
 
-// ¡ACTIVAR CLAVES FORÁNEAS! (desactivadas por defecto en SQLite)
+// ACTIVAR CLAVES FORÁNEAS (obligatorio para que funcionen las restricciones)
 db.pragma('foreign_keys = ON');
 
 function initDb() {
@@ -74,6 +74,8 @@ function initDb() {
       FOREIGN KEY (routine_exercise_id) REFERENCES routine_exercises(id)
     );
   `);
+
+  console.log('✅ Base de datos inicializada correctamente.');
 }
 
 module.exports = { db, initDb };
