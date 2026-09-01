@@ -1,0 +1,2 @@
+[build]
+packages = ["python3", "gcc", "gnumake"]
