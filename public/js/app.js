@@ -26,14 +26,11 @@ async function apiFetch(url, options = {}) {
   if (contentType && contentType.includes('application/json')) {
     data = await response.json();
   } else {
-    // Si no es JSON, leer como texto (posible HTML)
     const text = await response.text();
-    // Si la respuesta no es exitosa, lanzamos error con el texto
     if (!response.ok) {
-      throw new Error(`Error ${response.status}: ${text.substring(0, 100)}...`);
+      throw new Error(`Error ${response.status}: ${text.substring(0, 200)}...`);
     }
-    // Si es exitosa pero no es JSON (raro), lanzamos error
-    throw new Error(`Respuesta inesperada (no JSON): ${text.substring(0, 100)}...`);
+    throw new Error(`Respuesta inesperada (no JSON): ${text.substring(0, 200)}...`);
   }
 
   if (data.error) {
@@ -244,7 +241,7 @@ async function renderRoutines() {
   }
 }
 
-// ---------- EDITOR DE RUTINAS (con búsqueda predictiva y sin pérdida de datos) ----------
+// ---------- EDITOR DE RUTINAS (CORREGIDO) ----------
 async function renderEdit(data) {
   const mode = data.mode;
   const routineId = data.routineId;
@@ -253,6 +250,7 @@ async function renderEdit(data) {
 
   try {
     exercisesList = await apiFetch('/api/exercises');
+    console.log('📋 Lista de ejercicios cargada:', exercisesList);
     if (mode === 'edit' && routineId) {
       routine = await apiFetch(`/api/routines/${routineId}`);
     }
@@ -377,7 +375,7 @@ async function renderEdit(data) {
       });
     });
 
-    // Agregar ejercicio
+    // Agregar ejercicio (con búsqueda predictiva)
     document.getElementById('add-exercise-btn').addEventListener('click', () => {
       const searchInput = document.getElementById('exercise-search');
       const searchTerm = searchInput.value.trim();
@@ -385,6 +383,7 @@ async function renderEdit(data) {
         alert('Escribe el nombre del ejercicio que deseas agregar.');
         return;
       }
+      // Buscar coincidencia exacta (case insensitive)
       const matched = exercisesList.find(e => e.name.toLowerCase() === searchTerm.toLowerCase());
       if (!matched) {
         alert(`No se encontró el ejercicio "${searchTerm}". Revisa la lista de ejercicios disponibles.`);
@@ -392,7 +391,7 @@ async function renderEdit(data) {
       }
       syncStateFromInputs();
       state.exercises.push({
-        exerciseId: matched.id,
+        exerciseId: matched.id,  // ID correcto de la lista actual
         exerciseName: matched.name,
         sets: [{ kg: '', reps: '' }]
       });
@@ -416,6 +415,9 @@ async function renderEdit(data) {
         exerciseId: ex.exerciseId,
         sets: ex.sets.map(s => ({ kg: s.kg || null, reps: s.reps || '' }))
       }));
+
+      console.log('📤 Enviando al servidor:', JSON.stringify({ name, exercises: exercisesData }, null, 2));
+
       try {
         if (mode === 'create') {
           await apiFetch('/api/routines', {
