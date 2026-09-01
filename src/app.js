@@ -30,4 +30,15 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
+// ============================================================
+// MIDDLEWARE DE MANEJO DE ERRORES (DEBE IR AL FINAL)
+// ============================================================
+app.use((err, req, res, next) => {
+  console.error('Error no capturado:', err);
+  // Siempre devolver JSON, incluso si el error es 500
+  res.status(err.status || 500).json({
+    error: err.message || 'Error interno del servidor'
+  });
+});
+
 module.exports = app;
