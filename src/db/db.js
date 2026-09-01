@@ -4,7 +4,9 @@ const path = require('path');
 const dbPath = path.join(__dirname, '../../database.sqlite');
 const db = new Database(dbPath);
 
-// Crear tablas si no existen
+// ¡ACTIVAR CLAVES FORÁNEAS! (desactivadas por defecto en SQLite)
+db.pragma('foreign_keys = ON');
+
 function initDb() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
